@@ -166,7 +166,7 @@ class PrizePicksScraper:
         
         # Prepare query parameters
         params = {
-            "per_page": 250,  # Maximum allowed by the API
+            "per_page": 50,  # Maximum allowed by the API
             "single_stat": True,
             "game_mode": "pickem"
         }
@@ -245,6 +245,8 @@ class PrizePicksScraper:
                         is_active=proj_data["attributes"].get("is_active", True),
                         opponent=game_data.get("attributes", {}).get("away_team")
                     )
+                    if len(projections) > 30:
+                        break
                     projections.append(projection)
                 except (KeyError, ValueError) as e:
                     logger.warning(f"Failed to parse projection data: {e}")

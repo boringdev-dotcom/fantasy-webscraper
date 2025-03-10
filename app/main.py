@@ -33,6 +33,12 @@ def get_scraper():
 async def root():
     return {"message": "Welcome to PrizePicks Fantasy Webscraper API"}
 
+@app.head("/")
+async def root_head():
+    # HEAD requests should return the same headers as GET but no body
+    # FastAPI will handle this automatically
+    return {"message": "Welcome to PrizePicks Fantasy Webscraper API"}
+
 @app.get("/api/sports", response_model=List[Sport])
 async def get_sports(scraper: PrizePicksScraper = Depends(get_scraper)):
     """
