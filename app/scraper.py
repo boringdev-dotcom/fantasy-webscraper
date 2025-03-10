@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import time
 import random
+import uuid
 from app.models import Sport, Player, Game, Projection
 
 # Configure logging
@@ -18,11 +19,14 @@ class PrizePicksScraper:
     
     BASE_URL = "https://api.prizepicks.com"
     HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         "Accept": "application/json",
         "Content-Type": "application/json",
         "Referer": "https://app.prizepicks.com/",
-        "X-Device-ID": "web",  # This might need to be generated randomly
+        "X-Device-ID": "1a9d6304-65f3-4304-8523-ccf458d3c0c4",  # This will be replaced in __init__
+        "sec-ch-ua": "\"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
     }
     
     # Cache to store data and reduce API calls
@@ -36,10 +40,21 @@ class PrizePicksScraper:
     # Cache expiration time in seconds (15 minutes)
     CACHE_EXPIRY = 15 * 60
     
+    @staticmethod
+    def _generate_device_id() -> str:
+        """Generate a random device ID in UUID format."""
+        return str(uuid.uuid4())
+    
     def __init__(self):
         """Initialize the scraper with default settings."""
         self.session = requests.Session()
-        self.session.headers.update(self.HEADERS)
+        
+        # Create a copy of the headers and update with a random device ID
+        headers = self.HEADERS.copy()
+        headers["X-Device-ID"] = self._generate_device_id()
+        
+        self.session.headers.update(headers)
+        logger.info("Initialized PrizePicksScraper with new device ID")
     
     def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -54,16 +69,40 @@ class PrizePicksScraper:
         """
         url = f"{self.BASE_URL}/{endpoint}"
         
-        try:
-            # Add a small random delay to avoid rate limiting
-            time.sleep(random.uniform(0.1, 0.5))
-            
-            response = self.session.get(url, params=params)
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
-            logger.error(f"API request failed: {e}")
-            raise Exception(f"Failed to fetch data from PrizePicks API: {str(e)}")
+        # Maximum number of retries
+        max_retries = 3
+        retry_count = 0
+        backoff_factor = 1.5
+        
+        while retry_count < max_retries:
+            try:
+                # Add a small random delay to avoid rate limiting
+                time.sleep(random.uniform(0.5, 1.0))
+                
+                logger.info(f"Making request to {url} with params {params}")
+                logger.debug(f"Request headers: {self.session.headers}")
+                
+                response = self.session.get(url, params=params)
+                
+                # Log response details
+                logger.info(f"Response status: {response.status_code}")
+                logger.debug(f"Response headers: {response.headers}")
+                
+                if response.status_code != 200:
+                    logger.warning(f"Non-200 response: {response.text[:500]}")
+                
+                response.raise_for_status()
+                return response.json()
+            except requests.RequestException as e:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"API request failed after {max_retries} attempts: {e}")
+                    raise Exception(f"Failed to fetch data from PrizePicks API: {str(e)}")
+                
+                # Calculate backoff time with jitter
+                backoff_time = (backoff_factor ** retry_count) + random.uniform(0.1, 0.5)
+                logger.warning(f"Request failed, retrying in {backoff_time:.2f} seconds... (Attempt {retry_count}/{max_retries})")
+                time.sleep(backoff_time)
     
     def get_sports(self) -> List[Sport]:
         """
@@ -166,10 +205,16 @@ class PrizePicksScraper:
         
         # Prepare query parameters
         params = {
-            "per_page": 50,  # Maximum allowed by the API
             "single_stat": True,
             "game_mode": "pickem"
         }
+        
+        # For league_id 7 (which appears to be NFL based on the curl command), 
+        # we can request more projections per page
+        if sport_id == 7:
+            params["per_page"] = 250
+        else:
+            params["per_page"] = 50  # Default for other leagues
         
         if sport_id:
             params["league_id"] = sport_id
