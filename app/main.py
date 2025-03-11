@@ -180,8 +180,7 @@ async def refresh_sport_data(
         return {
             "success": True,
             "sport": {
-                "id": sport.id,
-                "name": sport.name
+                "id": sport_id,
             },
             "refresh_time": datetime.now().isoformat(),
             "elapsed_time": elapsed_time,
@@ -205,7 +204,3 @@ async def refresh_sport_data(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to refresh sport data: {str(e)}")
-
-
-# if __name__ == "__main__":
-#     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True) 
