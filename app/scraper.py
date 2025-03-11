@@ -1,3 +1,4 @@
+import sys
 import requests
 import json
 import logging
@@ -9,7 +10,11 @@ import uuid
 from app.models import Sport, Player, Game, Projection
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 logger = logging.getLogger(__name__)
 
 class PrizePicksScraper:
