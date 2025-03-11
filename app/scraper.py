@@ -206,8 +206,11 @@ class PrizePicksScraper:
             cache_key in self._projections_cache and 
             (current_time - self._projections_cache_time.get(cache_key, 0)) < self.CACHE_EXPIRY
         ):
+            logger.info(f"Returning cached projections for {cache_key}")
             return self._projections_cache[cache_key]
         
+        logger.info(f"Cache Miss: Fetching projections for {cache_key}")
+
         # Prepare query parameters
         params = {
             "single_stat": True,
