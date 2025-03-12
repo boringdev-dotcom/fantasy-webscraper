@@ -95,18 +95,29 @@ async def get_player_data(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch player data: {str(e)}")
 
-@app.get("/api/projections", response_model=List[Projection])
+@app.get("/api/projections")
 async def get_projections(
     sport_id: Optional[int] = None,
     player_name: Optional[str] = None,
     stat_type: Optional[str] = None,
+    page: Optional[int] = Query(None, ge=1, description="Page number, starting from 1"),
+    page_size: Optional[int] = Query(None, ge=1, le=100, description="Number of items per page"),
     scraper: PrizePicksScraper = Depends(get_scraper)
 ):
     """
-    Get all projections, with optional filters
+    Get projections with optional pagination.
+    
+    If page and page_size are provided, returns paginated results with metadata.
+    If pagination parameters are not provided, returns all results.
     """
     try:
-        return scraper.get_projections(sport_id, player_name, stat_type)
+        return scraper.get_projections(
+            sport_id=sport_id, 
+            player_name=player_name, 
+            stat_type=stat_type,
+            page=page,
+            page_size=page_size
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch projections: {str(e)}")
 

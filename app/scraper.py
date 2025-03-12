@@ -214,10 +214,10 @@ class PrizePicksScraper:
         
         return {
             "sport": sport.dict(),
-            "projections_count": len(projections),
+            "projections_count": len([projections['items']]),
             "games_count": len(games),
             "players_count": len(players),
-            "projections": [p.dict() for p in projections[:10]],  # Return only first 10 projections
+            "projections": [p.dict() for p in projections['items'][:10]],  # Return only first 10 projections
             "games": [g.dict() for g in games[:10]],  # Return only first 10 games
             "players": [p.dict() for p in players[:10]]  # Return only first 10 players
         }
@@ -227,19 +227,24 @@ class PrizePicksScraper:
         sport_id: Optional[int] = None, 
         player_name: Optional[str] = None,
         stat_type: Optional[str] = None,
-        force_refresh: bool = False
-    ) -> List[Projection]:
+        force_refresh: bool = False,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
-        Get projections from MongoDB or PrizePicks API if data is stale.
+        Get projections from MongoDB with optional pagination.
         
         Args:
             sport_id: Optional filter by sport ID
             player_name: Optional filter by player name
             stat_type: Optional filter by stat type
             force_refresh: Force refresh from API regardless of cache status
+            page: Optional page number (starting from 1)
+            page_size: Optional number of items per page
             
         Returns:
-            A list of Projection objects
+            If pagination is used: A dictionary with pagination info and projection objects
+            If no pagination: A list of projection objects
         """
         # Build query for MongoDB
         query = {}
@@ -250,29 +255,20 @@ class PrizePicksScraper:
         if stat_type:
             query["stat_type"] = stat_type
         
-        # Check if we need to refresh data from API
-        # current_time = time.time()
-        # needs_refresh = force_refresh
+        # Get total count
+        total_count = self.projections_collection.count_documents(query)
         
-        # if not needs_refresh and sport_id:
-        #     # Check when this sport was last updated
-        #     last_updated_doc = self.projections_collection.find_one(
-        #         {"sport_id": sport_id},
-        #         sort=[("last_updated", -1)],
-        #         projection={"last_updated": 1}
-        #     )
-            
-        #     if not last_updated_doc or (current_time - last_updated_doc.get("last_updated", 0)) > self.CACHE_EXPIRY:
-        #         needs_refresh = True
+        # Determine if pagination is being used
+        use_pagination = page is not None and page_size is not None
         
-        # # Refresh data from API if needed
-        # if needs_refresh and sport_id:
-        #     logger.info(f"Refreshing projections data for sport_id={sport_id} from API")
-        #     # don't refresh projections from API, just use db
-        #     self._refresh_projections_from_api(sport_id)
-        
-        # Get data from MongoDB
-        projection_docs = list(self.projections_collection.find(query))
+        # Get data from MongoDB (with or without pagination)
+        if use_pagination:
+            # Calculate pagination parameters
+            skip = (page - 1) * page_size
+            projection_docs = list(self.projections_collection.find(query).skip(skip).limit(page_size))
+        else:
+            # Get all data
+            projection_docs = list(self.projections_collection.find(query))
         
         # Convert to Projection objects
         projections = []
@@ -288,7 +284,31 @@ class PrizePicksScraper:
             except Exception as e:
                 logger.warning(f"Failed to parse projection data from MongoDB: {e}")
         
-        return projections
+        # Return appropriate response format based on whether pagination is used
+        if use_pagination:
+            # Calculate pagination metadata
+            total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
+            has_next = page < total_pages
+            has_prev = page > 1
+            
+            # Return paginated response
+            return {
+                "items": projections,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": total_pages,
+                    "has_next": has_next,
+                    "has_prev": has_prev
+                }
+            }
+        else:
+            # For backward compatibility, return just the list if no pagination
+            return {
+                "items": projections,
+                "total_count": total_count
+            }
     
     def _refresh_projections_from_api(self, sport_id: int) -> None:
         """
@@ -487,7 +507,7 @@ class PrizePicksScraper:
             
             # Get projections for this player
             projections = self.get_projections(player_name=doc["name"])
-            doc["projections"] = [p.dict() for p in projections]
+            doc["projections"] = [p.dict() for p in projections['items']]
             
             try:
                 player = Player(**doc)
