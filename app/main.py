@@ -174,7 +174,7 @@ async def refresh_sport_data(
         #     raise HTTPException(status_code=404, detail=f"Sport with ID {sport_id} not found")
         
         # Get counts before refresh
-        pre_projections = len(scraper.get_projections(sport_id=sport_id))
+        pre_projections = len(scraper.get_projections(sport_id=sport_id)['items'])
         pre_players = len(scraper.get_players(sport_id=sport_id))
         pre_games = len(scraper.get_games(sport_id=sport_id))
         
@@ -182,7 +182,7 @@ async def refresh_sport_data(
         scraper.refresh_all_data(sport_id=sport_id)
         
         # Get counts after refresh
-        post_projections = len(scraper.get_projections(sport_id=sport_id))
+        post_projections = len(scraper.get_projections(sport_id=sport_id)['items'])
         post_players = len(scraper.get_players(sport_id=sport_id))
         post_games = len(scraper.get_games(sport_id=sport_id))
         
