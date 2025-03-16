@@ -86,23 +86,11 @@ class PrizePicksScraper:
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-site",
             "Connection": "keep-alive",
-            "DNT": "1"
-        },
-        {
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Content-Type": "application/json",
-            "Origin": "https://prizepicks.com",
-            "Referer": "https://prizepicks.com/",
-            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-site",
-            "Connection": "keep-alive",
-            "DNT": "1"
+            "DNT": "1",
+            "Host": "api.prizepicks.com",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "X-Requested-With": "XMLHttpRequest"
         }
     ]
     
@@ -253,16 +241,37 @@ class PrizePicksScraper:
                 time.sleep(wait_time)
         
         try:
-            # Rotate headers occasionally
-            if random.random() < 0.2:  # 20% chance to rotate headers
-                self._rotate_headers()
+            # Always rotate headers for each request
+            self._rotate_headers()
+            
+            # Add cookies
+            cookies = {
+                "_ga": f"GA1.1.{random.randint(1000000000, 9999999999)}.{int(time.time())}",
+                "_ga_XXXXXXXXXX": f"GS1.1.{int(time.time())}.1.1.{int(time.time())}.0.0.0",
+            }
             
             logger.info(f"Making request to {url} with params {params}")
-            response = self.session.get(url, params=params)
+            
+            # Add random delay before request
+            time.sleep(random.uniform(1, 3))
+            
+            response = self.session.get(
+                url, 
+                params=params,
+                cookies=cookies,
+                allow_redirects=True,
+                verify=True,
+                timeout=30
+            )
             
             # Log response details
             logger.info(f"Response status: {response.status_code}")
             logger.debug(f"Response headers: {response.headers}")
+            
+            if response.status_code == 403:
+                logger.warning("Received 403 error, rotating headers and retrying...")
+                time.sleep(random.uniform(2, 5))  # Add longer delay on 403
+                return self._make_request(endpoint, params)  # Retry with new headers
             
             if response.status_code == 429:
                 wait_time = self._handle_rate_limit(response)
