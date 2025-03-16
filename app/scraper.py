@@ -122,6 +122,35 @@ class PrizePicksScraper:
         """
         self.session = requests.Session()
         
+        # Initialize MongoDB connection
+        if not mongo_uri or not db_name:
+            raise ValueError("MongoDB URI and database name must be provided in environment variables")
+        
+        try:
+            self.mongo_client = MongoClient(mongo_uri)
+            self.db = self.mongo_client[db_name]
+            
+            # Initialize collections
+            self.projections_collection = self.db['projections']
+            self.players_collection = self.db['players']
+            self.games_collection = self.db['games']
+            
+            # Create indexes for better query performance
+            self.projections_collection.create_index([("sport_id", 1)])
+            self.projections_collection.create_index([("player_name", 1)])
+            self.projections_collection.create_index([("last_updated", 1)])
+            
+            self.players_collection.create_index([("sport_id", 1)])
+            self.players_collection.create_index([("name", 1)])
+            
+            self.games_collection.create_index([("sport_id", 1)])
+            self.games_collection.create_index([("start_time", 1)])
+            
+            logger.info("Successfully connected to MongoDB")
+        except Exception as e:
+            logger.error(f"Failed to connect to MongoDB: {e}")
+            raise Exception(f"MongoDB connection failed: {str(e)}")
+        
         # Initialize rate limiter (2 requests per second with burst of 5)
         self.rate_limiter = RateLimiter(rate=2.0, burst=5)
         
