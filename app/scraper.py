@@ -70,27 +70,24 @@ class PrizePicksScraper:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0"
     ]
     
-    # Multiple header configurations for rotation
+    # Single header template that matches PrizePicks web app exactly
     HEADER_TEMPLATES = [
         {
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Content-Type": "application/json",
-            "Origin": "https://app.prizepicks.com",
-            "Referer": "https://app.prizepicks.com/",
-            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-site",
-            "Connection": "keep-alive",
-            "DNT": "1",
-            "Host": "api.prizepicks.com",
-            "Cache-Control": "no-cache",
-            "Pragma": "no-cache",
-            "X-Requested-With": "XMLHttpRequest"
+            "authority": "api.prizepicks.com",
+            "accept": "application/json, text/plain, */*",
+            "accept-language": "en-US,en;q=0.9",
+            "cache-control": "no-cache",
+            "dnt": "1",
+            "origin": "https://app.prizepicks.com",
+            "pragma": "no-cache",
+            "referer": "https://app.prizepicks.com/",
+            "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-site",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
     ]
     
@@ -241,26 +238,34 @@ class PrizePicksScraper:
                 time.sleep(wait_time)
         
         try:
-            # Always rotate headers for each request
-            self._rotate_headers()
+            # Generate session token
+            session_token = str(uuid.uuid4())
             
-            # Add cookies
+            # Create base headers
+            headers = self.HEADER_TEMPLATES[0].copy()
+            headers["user-agent"] = random.choice(self.USER_AGENTS)
+            headers["x-device-id"] = self._generate_device_id()
+            headers["x-pp-session"] = session_token
+            
+            # Add cookies that match the web app
             cookies = {
                 "_ga": f"GA1.1.{random.randint(1000000000, 9999999999)}.{int(time.time())}",
                 "_ga_XXXXXXXXXX": f"GS1.1.{int(time.time())}.1.1.{int(time.time())}.0.0.0",
+                "pp_session": session_token,
+                "pp_device_id": headers["x-device-id"],
+                "pp_guest": "true"
             }
             
             logger.info(f"Making request to {url} with params {params}")
             
-            # Add random delay before request
-            time.sleep(random.uniform(1, 3))
+            # Add small random delay
+            time.sleep(random.uniform(0.5, 1.5))
             
             response = self.session.get(
                 url, 
                 params=params,
+                headers=headers,
                 cookies=cookies,
-                allow_redirects=True,
-                verify=True,
                 timeout=30
             )
             
@@ -269,9 +274,9 @@ class PrizePicksScraper:
             logger.debug(f"Response headers: {response.headers}")
             
             if response.status_code == 403:
-                logger.warning("Received 403 error, rotating headers and retrying...")
-                time.sleep(random.uniform(2, 5))  # Add longer delay on 403
-                return self._make_request(endpoint, params)  # Retry with new headers
+                logger.warning("Received 403 error, retrying with new session...")
+                time.sleep(random.uniform(1, 2))  # Add shorter delay on 403
+                return self._make_request(endpoint, params)  # Retry with new session
             
             if response.status_code == 429:
                 wait_time = self._handle_rate_limit(response)
