@@ -1,3 +1,5 @@
+from datetime import datetime
+import time
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
@@ -138,6 +140,67 @@ async def get_game_data(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch game data: {str(e)}")
-
-if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True) 
+    
+@app.get("/api/refresh/{sport_id}", response_model=Dict[str, Any])
+async def refresh_sport_data(
+    sport_id: int,
+    scraper: PrizePicksScraper = Depends(get_scraper)
+):
+    """
+    Refresh data for a specific sport by ID
+    
+    This endpoint triggers a refresh of all data (projections, players, games) for the specified sport.
+    It may take some time to complete as it fetches fresh data from the PrizePicks API.
+    """
+    try:
+        start_time = time.time()
+        
+        # Check if sport exists
+        # sports = scraper.get_sports()
+        # sport = next((s for s in sports if s.id == sport_id), None)
+        
+        # if not sport:
+        #     raise HTTPException(status_code=404, detail=f"Sport with ID {sport_id} not found")
+        
+        # Get counts before refresh
+        pre_projections = len(scraper.get_projections(sport_id=sport_id))
+        pre_players = len(scraper.get_players(sport_id=sport_id))
+        pre_games = len(scraper.get_games(sport_id=sport_id))
+        
+        # Call the existing refresh function
+        scraper.refresh_all_data(sport_id=sport_id)
+        
+        # Get counts after refresh
+        post_projections = len(scraper.get_projections(sport_id=sport_id))
+        post_players = len(scraper.get_players(sport_id=sport_id))
+        post_games = len(scraper.get_games(sport_id=sport_id))
+        
+        elapsed_time = time.time() - start_time
+        
+        return {
+            "success": True,
+            "sport": {
+                "id": sport_id,
+            },
+            "refresh_time": datetime.now().isoformat(),
+            "elapsed_time": elapsed_time,
+            "projections": {
+                "before": pre_projections,
+                "after": post_projections,
+                "difference": post_projections - pre_projections
+            },
+            "players": {
+                "before": pre_players,
+                "after": post_players,
+                "difference": post_players - pre_players
+            },
+            "games": {
+                "before": pre_games,
+                "after": post_games,
+                "difference": post_games - pre_games
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to refresh sport data: {str(e)}")
