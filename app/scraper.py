@@ -14,6 +14,11 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
+import threading
+from collections import deque
+from fake_useragent import UserAgent
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Configure logging
 logging.basicConfig(
@@ -24,6 +29,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class RateLimiter:
+    """Rate limiter using token bucket algorithm"""
+    def __init__(self, rate: float, burst: int):
+        self.rate = rate  # requests per second
+        self.burst = burst
+        self.tokens = burst
+        self.last_update = time.time()
+        self.lock = threading.Lock()
+        
+    def acquire(self) -> float:
+        """Acquire a token. Returns the time to wait if no tokens are available."""
+        with self.lock:
+            now = time.time()
+            # Add new tokens based on time elapsed
+            new_tokens = (now - self.last_update) * self.rate
+            self.tokens = min(self.burst, self.tokens + new_tokens)
+            self.last_update = now
+            
+            if self.tokens >= 1:
+                self.tokens -= 1
+                return 0
+            else:
+                wait_time = (1 - self.tokens) / self.rate
+                return wait_time
+
 class PrizePicksScraper:
     """
     A scraper for the PrizePicks API to fetch sports, players, games, and projections data.
@@ -31,18 +61,42 @@ class PrizePicksScraper:
     """
     
     BASE_URL = "https://api.prizepicks.com"
-    HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Referer": "https://app.prizepicks.com/",
-        "X-Device-ID": "1a9d6304-65f3-4304-8523-ccf458d3c0c4",  # This will be replaced in __init__
-        "sec-ch-ua": "\"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\"",
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": "\"macOS\""
-    }
     
-    # Cache to store data and reduce API calls
+    # Multiple user agents for rotation
+    USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
+    ]
+    
+    # Multiple header configurations for rotation
+    HEADER_TEMPLATES = [
+        {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Referer": "https://app.prizepicks.com/",
+            "Origin": "https://app.prizepicks.com",
+            "sec-ch-ua": '"Not/A)Brand";v="99", "Google Chrome";v="91"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-site",
+        },
+        {
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "Referer": "https://prizepicks.com/",
+            "Origin": "https://prizepicks.com",
+            "sec-ch-ua": '"Chromium";v="92", " Not A;Brand";v="99"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-site",
+        }
+    ]
+    
+    # Cache settings
     _sports_cache = None
     _sports_cache_time = 0
     _projections_cache = {}
@@ -68,44 +122,67 @@ class PrizePicksScraper:
         """
         self.session = requests.Session()
         
-        # Create a copy of the headers and update with a random device ID
-        headers = self.HEADERS.copy()
+        # Initialize rate limiter (2 requests per second with burst of 5)
+        self.rate_limiter = RateLimiter(rate=2.0, burst=5)
+        
+        # Setup retry strategy
+        retry_strategy = Retry(
+            total=5,  # total number of retries
+            backoff_factor=1.5,  # exponential backoff
+            status_forcelist=[429, 500, 502, 503, 504],  # status codes to retry on
+            allowed_methods=["GET"],  # only retry on GET requests
+            respect_retry_after_header=True  # respect Retry-After header
+        )
+        
+        # Mount the retry adapter
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        
+        # Initialize headers
+        self._rotate_headers()
+        
+        # Request queue
+        self.request_queue = deque()
+        self.queue_lock = threading.Lock()
+        
+        logger.info("Initialized PrizePicksScraper with rate limiting and retry strategy")
+    
+    def _rotate_headers(self):
+        """Rotate headers and user agent"""
+        headers = random.choice(self.HEADER_TEMPLATES).copy()
+        headers["User-Agent"] = random.choice(self.USER_AGENTS)
         headers["X-Device-ID"] = self._generate_device_id()
         
+        # Add random viewport and screen resolution
+        viewport_width = random.randint(1024, 1920)
+        viewport_height = random.randint(768, 1080)
+        headers["Viewport-Width"] = str(viewport_width)
+        headers["Viewport-Height"] = str(viewport_height)
+        
         self.session.headers.update(headers)
-        
-        # Initialize MongoDB connection
-        self.mongo_client = MongoClient(mongo_uri)
-        self.db = self.mongo_client[db_name]
-        self.sports_collection = self.db["sports"]
-        self.projections_collection = self.db["projections"]
-        self.players_collection = self.db["players"]
-        self.games_collection = self.db["games"]
-        
-        # Create indexes for faster queries
-        self._create_indexes()
-        
-        logger.info("Initialized PrizePicksScraper with MongoDB connection")
     
-    def _create_indexes(self):
-        """Create MongoDB indexes for better query performance."""
-        # Index for projections
-        self.projections_collection.create_index([("sport_id", 1)])
-        self.projections_collection.create_index([("player_name", 1)])
-        self.projections_collection.create_index([("stat_type", 1)])
-        self.projections_collection.create_index([("last_updated", 1)])
+    def _handle_rate_limit(self, response: requests.Response) -> float:
+        """Handle rate limit response and return wait time"""
+        wait_time = 5  # default wait time
         
-        # Index for players
-        self.players_collection.create_index([("name", 1)])
-        self.players_collection.create_index([("sport_id", 1)])
+        # Check for Retry-After header
+        retry_after = response.headers.get('Retry-After')
+        if retry_after:
+            try:
+                wait_time = float(retry_after)
+            except (ValueError, TypeError):
+                pass
         
-        # Index for games
-        self.games_collection.create_index([("sport_id", 1)])
-        self.games_collection.create_index([("start_time", 1)])
+        # Add jitter to avoid thundering herd
+        wait_time += random.uniform(0.1, 1.0)
+        
+        logger.warning(f"Rate limited. Waiting {wait_time} seconds before retry")
+        return wait_time
     
     def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Make a request to the PrizePicks API.
+        Make a request to the PrizePicks API with rate limiting and retry handling.
         
         Args:
             endpoint: The API endpoint to request
@@ -116,40 +193,54 @@ class PrizePicksScraper:
         """
         url = f"{self.BASE_URL}/{endpoint}"
         
-        # Maximum number of retries
-        max_retries = 3
-        retry_count = 0
-        backoff_factor = 1.5
+        # Wait for rate limiter
+        wait_time = self.rate_limiter.acquire()
+        if wait_time > 0:
+            logger.info(f"Rate limit: waiting {wait_time:.2f} seconds")
+            time.sleep(wait_time)
         
-        while retry_count < max_retries:
-            try:
-                # Add a small random delay to avoid rate limiting
-                time.sleep(random.uniform(0.5, 1.0))
-                
-                logger.info(f"Making request to {url} with params {params}")
-                logger.debug(f"Request headers: {self.session.headers}")
-                
-                response = self.session.get(url, params=params)
-                
-                # Log response details
-                logger.info(f"Response status: {response.status_code}")
-                logger.debug(f"Response headers: {response.headers}")
-                
-                if response.status_code != 200:
-                    logger.warning(f"Non-200 response: {response.text[:500]}")
-                
-                response.raise_for_status()
-                return response.json()
-            except requests.RequestException as e:
-                retry_count += 1
-                if retry_count >= max_retries:
-                    logger.error(f"API request failed after {max_retries} attempts: {e}")
-                    raise Exception(f"Failed to fetch data from PrizePicks API: {str(e)}")
-                
-                # Calculate backoff time with jitter
-                backoff_time = (backoff_factor ** retry_count) + random.uniform(0.1, 0.5)
-                logger.warning(f"Request failed, retrying in {backoff_time:.2f} seconds... (Attempt {retry_count}/{max_retries})")
-                time.sleep(backoff_time)
+        # Add request to queue
+        with self.queue_lock:
+            self.request_queue.append((time.time(), url))
+            
+            # Remove old requests from queue (older than 1 minute)
+            while self.request_queue and time.time() - self.request_queue[0][0] > 60:
+                self.request_queue.popleft()
+            
+            # If queue is too long, wait
+            if len(self.request_queue) > 10:
+                wait_time = random.uniform(1.0, 3.0)
+                logger.warning(f"Request queue full, waiting {wait_time:.2f} seconds")
+                time.sleep(wait_time)
+        
+        try:
+            # Rotate headers occasionally
+            if random.random() < 0.2:  # 20% chance to rotate headers
+                self._rotate_headers()
+            
+            logger.info(f"Making request to {url} with params {params}")
+            response = self.session.get(url, params=params)
+            
+            # Log response details
+            logger.info(f"Response status: {response.status_code}")
+            logger.debug(f"Response headers: {response.headers}")
+            
+            if response.status_code == 429:
+                wait_time = self._handle_rate_limit(response)
+                time.sleep(wait_time)
+                # Retry after waiting
+                return self._make_request(endpoint, params)
+            
+            response.raise_for_status()
+            return response.json()
+            
+        except requests.exceptions.RetryError as e:
+            logger.error(f"Max retries exceeded: {e}")
+            raise Exception(f"Failed to fetch data from PrizePicks API after multiple retries: {str(e)}")
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request failed: {e}")
+            raise Exception(f"Failed to fetch data from PrizePicks API: {str(e)}")
     
     def get_sports(self) -> List[Sport]:
         """
