@@ -10,5 +10,6 @@ urllib3>=2.0.7
 fake-useragent>=1.4.0
 python-json-logger>=2.0.7
 typing-extensions>=4.8.0 
-pydantic==2.4.2 
+pydantic>=2.10
 pymongo==4.11.2
+crawl4ai==0.5.0
