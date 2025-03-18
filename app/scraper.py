@@ -74,22 +74,20 @@ class PrizePicksScraper:
     HEADER_TEMPLATES = [
         {
             "authority": "api.prizepicks.com",
-            "accept": "application/json",
+            "accept": "application/json, text/plain, */*",
             "accept-language": "en-US,en;q=0.9",
             "cache-control": "no-cache",
-            "content-type": "application/json",
             "dnt": "1",
             "origin": "https://app.prizepicks.com",
             "pragma": "no-cache",
             "referer": "https://app.prizepicks.com/",
-            "sec-ch-ua": '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+            "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"',
             "sec-fetch-dest": "empty",
             "sec-fetch-mode": "cors",
             "sec-fetch-site": "same-site",
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
-            "priority": "u=1, i"
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
     ]
     
@@ -240,52 +238,23 @@ class PrizePicksScraper:
                 time.sleep(wait_time)
         
         try:
-            # Generate device ID and session token
-            device_id = self._generate_device_id()
+            # Generate session token
             session_token = str(uuid.uuid4())
             
             # Create base headers
             headers = self.HEADER_TEMPLATES[0].copy()
             headers["user-agent"] = random.choice(self.USER_AGENTS)
-            headers["x-device-id"] = device_id
-            headers["x-device-info"] = f"name=,os=windows,osVersion=Windows NT 10.0; Win64; x64,isSimulator=false,platform=web,appVersion=web,fbp=fb.1.{int(time.time())}.{random.randint(100000000000000000, 999999999999999999)}"
-            
-            # Generate timestamps
-            current_time = int(time.time())
+            headers["x-device-id"] = self._generate_device_id()
+            headers["x-pp-session"] = session_token
             
             # Add cookies that match the web app
             cookies = {
-                "AMP_MKTG_4726fa62aa": f"JTdCJTIycmVmZXJyZXIlMjIlM0ElMjJodHRwcyUzQSUyRiUyRnd3dy5nb29nbGUuY29tJTJGJTIyJTJDJTIycmVmZXJyaW5nX2RvbWFpbiUyMiUzQSUyMnd3dy5nb29nbGUuY29tJTIyJTdE",
-                "afUserId": device_id,
-                "rl_anonymous_id": f"RS_ENC_v3_{device_id}",
-                "rl_page_init_referrer": "RS_ENC_v3_Imh0dHBzOi8vd3d3Lmdvb2dsZS5jb20vIg%3D%3D",
-                "rl_page_init_referring_domain": "RS_ENC_v3_Ind3dy5nb29nbGUuY29tIg%3D%3D",
-                "_tt_enable_cookie": "1",
-                "_ttp": f"-{uuid.uuid4().hex[:8]}",
-                "_gcl_au": f"1.1.{random.randint(100000000, 999999999)}.{current_time}",
-                "rs_ga": f"GA1.1.{device_id}",
-                "_scid": f"g{uuid.uuid4().hex[:24]}",
-                "_fbp": f"fb.1.{current_time}.{random.randint(100000000000000000, 999999999999999999)}",
-                "__podscribe_prizepicks_referrer": "https://www.google.com/",
-                "__podscribe_prizepicks_landing_url": "https://www.prizepicks.com/",
-                "__podscribe_did": f"pscrb_{uuid.uuid4()}",
-                "AMP_4726fa62aa": f"JTdCJTIyZGV2aWNlSWQlMjIlM0ElMjIzNWZiOWQzMi03MThkLTRhODMtOWQyMS1iNzk2YzhlM2M1YmQlMjIlMkMlMjJzZXNzaW9uSWQlMjIlM0ExNzM1NDQzNjE5MjU5JTJDJTIyb3B0T3V0JTIyJTNBZmFsc2UlMkMlMjJsYXN0RXZlbnRUaW1lJTIyJTNBMTczNTQ0MzYxOTUwMyUyQyUyMmxhc3RFdmVudElkJTIyJTNBNCUyQyUyMnBhZ2VDb3VudGVyJTIyJTNBMSU3RA==",
-                "_pxvid": f"{uuid.uuid4().hex}-{random.randint(1000, 9999)}",
-                "__pxvid": f"{uuid.uuid4().hex}-{random.randint(1000, 9999)}",
-                "intercom-id-qmdeaj0t": str(uuid.uuid4()),
-                "intercom-device-id-qmdeaj0t": str(uuid.uuid4()),
-                "_vwo_uuid_v2": f"{uuid.uuid4().hex}|{uuid.uuid4().hex}",
-                "pp_guest": "true",
+                "_ga": f"GA1.1.{random.randint(1000000000, 9999999999)}.{int(time.time())}",
+                "_ga_XXXXXXXXXX": f"GS1.1.{int(time.time())}.1.1.{int(time.time())}.0.0.0",
                 "pp_session": session_token,
-                "pp_device_id": device_id,
-                "CSRF-TOKEN": str(uuid.uuid4()),
-                "_prizepicks_session": str(uuid.uuid4())
+                "pp_device_id": headers["x-device-id"],
+                "pp_guest": "true"
             }
-            
-            # Add state_code parameter for US-based requests
-            if params is None:
-                params = {}
-            params["state_code"] = "CA"
             
             logger.info(f"Making request to {url} with params {params}")
             
@@ -371,6 +340,7 @@ class PrizePicksScraper:
         Returns:
             A dictionary with sport data
         """
+        #Build
         # First check if we have this sport in our cache
         sports = self.get_sports()
         sport = next((s for s in sports if s.id == sport_id), None)
