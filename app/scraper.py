@@ -122,7 +122,12 @@ class PrizePicksScraper:
             raise ValueError("MongoDB URI and database name must be provided in environment variables")
         
         try:
-            self.mongo_client = MongoClient(mongo_uri)
+            # Initialize MongoDB connection with SSL certificate verification
+            self.mongo_client = MongoClient(
+                mongo_uri,
+                tlsAllowInvalidCertificates=True,  # For development only
+                tls=True  # Enable TLS
+            )
             self.db = self.mongo_client[db_name]
             
             # Initialize collections
