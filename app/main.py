@@ -7,12 +7,16 @@ import uvicorn
 
 from app.scraper import PrizePicksScraper
 from app.models import Sport, Player, Game, Projection
+from app.scheduler import DataRefreshScheduler
 
 app = FastAPI(
     title="PrizePicks Fantasy Webscraper API",
     description="A real-time API for PrizePicks fantasy sports data",
     version="1.0.0"
 )
+
+# Initialize the scheduler
+scheduler = DataRefreshScheduler()
 
 # Add CORS middleware
 app.add_middleware(
@@ -30,6 +34,16 @@ def get_scraper():
         yield scraper
     finally:
         pass  # No cleanup needed for API-based scraper
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the scheduler when the application starts"""
+    scheduler.start()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop the scheduler when the application shuts down"""
+    scheduler.stop()
 
 @app.get("/")
 async def root():
